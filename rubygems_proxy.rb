@@ -1,4 +1,5 @@
 require "open-uri"
+require "open_uri_redirections"
 require "fileutils"
 require "logger"
 require "erb"
@@ -89,7 +90,7 @@ class RubygemsProxy
       open(filepath).read
     else
       logger.info "Read from interwebz: #{url}"
-      open(url).read.tap {|content| save(content)}
+      open(url, :allow_redirections => :safe).read.tap {|content| save(content)}
     end
   rescue Exception => error
     # Just try to load from file if something goes wrong.

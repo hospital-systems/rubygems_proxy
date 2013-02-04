@@ -1,10 +1,19 @@
 GEM
-  remote: http://gems.simplesideias.com.br/
+  remote: http://rubygems.org/
   specs:
+    kgio (2.8.0)
+    open_uri_redirections (0.1.0)
     rack (1.2.2)
+    raindrops (0.10.0)
+    unicorn (4.5.0)
+      kgio (~> 2.6)
+      rack
+      raindrops (~> 0.7)
 
 PLATFORMS
   ruby
 
 DEPENDENCIES
+  open_uri_redirections
   rack (>= 1.0.0)
+  unicorn
