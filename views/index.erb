@@ -47,7 +47,7 @@ gem: --no-rdoc --no-ri</code></pre>
                 <% gems = grouped_gems; names = gems.keys.sort %>
                 <% names.each do |name| %>
                     <li>
-                        <a href="<%= rubygems_url(name) %>"><%= name %></a>
+                        <a href="<%= rubygems_gem_url(name) %>"><%= name %></a>
 
                         <ul class="versions">
                             <% gems[name].sort.each do |version| %>

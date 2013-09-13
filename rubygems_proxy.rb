@@ -6,7 +6,7 @@ require "logger"
 require "erb"
 
 class RubygemsProxy
-  RUBY_GEMS_BASE_URI = "http://rubygems.org"
+  RUBY_GEMS_BASE_URI = "https://www.rubygems.org"
 
   attr_reader :env
 
@@ -21,20 +21,19 @@ class RubygemsProxy
 
   def run
     http_method = env["REQUEST_METHOD"]
-    logger.info "#{http_method} #{env["PATH_INFO"]}"
+    logger.info "#{http_method} #{path_with_query}"
 
     return update_specs if http_method == "DELETE"
-
     return handle_head_request if http_method == 'HEAD'
 
-    case env["PATH_INFO"]
-      when "/"
-        [200, {"Content-Type" => "text/html"}, [erb(:index)]]
+    case env['PATH_INFO']
+      when '/'
+        [200, {'Content-Type' => 'text/html'}, [erb(:index)]]
       else
-        [200, {"Content-Type" => "application/octet-stream"}, [contents]]
+        [200, {'Content-Type' => 'application/octet-stream'}, [contents]]
     end
   rescue Exception
-    [200, {"Content-Type" => "text/html"}, [erb(404)]]
+    [200, {'Content-Type' => "text/html"}, [erb(404)]]
   end
 
   private
@@ -43,11 +42,11 @@ class RubygemsProxy
   end
 
   def server_url
-    env["rack.url_scheme"] + "://" + File.join(env["SERVER_NAME"], env["PATH_INFO"])
+    env["rack.url_scheme"] + "://" + File.join(env['SERVER_NAME'], path_with_query)
   end
 
-  def rubygems_url(gemname)
-    "http://rubygems.org/gems/%s" % Rack::Utils.escape(gemname)
+  def rubygems_gem_url(gemname)
+    "#{RUBY_GEMS_BASE_URI}/gems/%s" % Rack::Utils.escape(gemname)
   end
 
   def gem_url(name, version)
@@ -77,7 +76,7 @@ class RubygemsProxy
   end
 
   def root_dir
-    File.expand_path "..", __FILE__
+    File.expand_path '..', __FILE__
   end
 
   def logger
@@ -92,15 +91,23 @@ class RubygemsProxy
     if cached?
       [200, {'Content-Type' => '', 'Content-Length' => File.size(filepath).to_s}, []]
     else
-      req = Net::HTTP.new('www.rubygems.org', 80)
-      resp = req.request_head(env["PATH_INFO"])
-      headers = Hash[resp.to_hash.map { |k, v| [k, v.join('; ')] }]
-      [resp.code.to_i, headers, resp.body || []]
+      uri = URI(RUBY_GEMS_BASE_URI)
+      Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
+        request = Net::HTTP::Head.new path_with_query
+        resp = http.request request
+        headers = Hash[resp.to_hash.map { |k, v| [k, v.join('; ')] }]
+        [resp.code.to_i, headers, resp.body || []]
+      end
     end
+  rescue Exception => ex
+    puts ex.backtrace.join("\n")
   end
 
   def contents
-    if File.directory?(filepath)
+    if !cacheable?
+      logger.info "Bypass to rubygems: #{url}"
+      open(url, :allow_redirections => :safe).read
+    elsif File.directory?(filepath)
       erb(404)
     elsif cached?
       logger.info "Read from cache: #{filepath}"
@@ -122,31 +129,45 @@ class RubygemsProxy
     File.open(filepath, "wb") { |handler| handler << contents }
   end
 
+  def cacheable?
+    unless env['PATH_INFO'] =~ /^\/api\//
+      filename = File.basename(filepath)
+      (filename =~ /^specs\./) || (filename !~ /\.gz$/)
+    end
+  end
+
   def cached?
+    return unless cacheable?
     case File.basename(filepath)
       when /^specs\./
         File.exist?(filepath) && (Time.now - File.mtime(filepath)).to_i < 84600
-      when /\.gz$/
-        false
       else
         File.file?(filepath)
     end
   end
 
   def specs?
-    env["PATH_INFO"] =~ /specs\..+\.gz$/
+    env['PATH_INFO'] =~ /specs\..+\.gz$/
   end
 
   def filepath
     if specs?
-      File.join(root_dir, env["PATH_INFO"])
+      File.join(root_dir, env['PATH_INFO'])
     else
-      File.join(cache_dir, env["PATH_INFO"])
+      File.join(cache_dir, env['PATH_INFO'])
+    end
+  end
+
+  def path_with_query
+    if env['QUERY_STRING'].to_s.empty?
+      env["PATH_INFO"]
+    else
+      [env["PATH_INFO"], env['QUERY_STRING']].join('?')
     end
   end
 
   def url
-    File.join(RUBY_GEMS_BASE_URI, env["PATH_INFO"])
+    File.join(RUBY_GEMS_BASE_URI, path_with_query)
   end
 
   def update_specs
