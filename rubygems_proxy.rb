@@ -1,10 +1,13 @@
 require "open-uri"
 require "open_uri_redirections"
+require "net/http"
 require "fileutils"
 require "logger"
 require "erb"
 
 class RubygemsProxy
+  RUBY_GEMS_BASE_URI = "http://rubygems.org"
+
   attr_reader :env
 
   def self.call(env)
@@ -17,15 +20,18 @@ class RubygemsProxy
   end
 
   def run
-    logger.info "#{env["REQUEST_METHOD"]} #{env["PATH_INFO"]}"
+    http_method = env["REQUEST_METHOD"]
+    logger.info "#{http_method} #{env["PATH_INFO"]}"
 
-    return update_specs if env["REQUEST_METHOD"] == "DELETE"
+    return update_specs if http_method == "DELETE"
+
+    return handle_head_request if http_method == 'HEAD'
 
     case env["PATH_INFO"]
-    when "/"
-      [200, {"Content-Type" => "text/html"}, [erb(:index)]]
-    else
-      [200, {"Content-Type" => "application/octet-stream"}, [contents]]
+      when "/"
+        [200, {"Content-Type" => "text/html"}, [erb(:index)]]
+      else
+        [200, {"Content-Type" => "application/octet-stream"}, [contents]]
     end
   rescue Exception
     [200, {"Content-Type" => "text/html"}, [erb(404)]]
@@ -82,6 +88,21 @@ class RubygemsProxy
     "#{root_dir}/public"
   end
 
+  def handle_head_request
+    if cached?
+      [200, {'Content-Type' => '', 'Content-Length' => File.size(filepath).to_s}, []]
+    else
+      req = Net::HTTP.new('www.rubygems.org', 80)
+      resp = req.request_head(env["PATH_INFO"])
+      headers = Hash[resp.to_hash.map { |k, v| [k, v.join('; ')] }]
+      p [resp.code.to_i, headers, resp.body]
+      [resp.code.to_i, headers, resp.body || []]
+    end
+  rescue Exception => ex
+    puts ex.inspect
+    0
+  end
+
   def contents
     if File.directory?(filepath)
       erb(404)
@@ -90,7 +111,7 @@ class RubygemsProxy
       open(filepath).read
     else
       logger.info "Read from interwebz: #{url}"
-      open(url, :allow_redirections => :safe).read.tap {|content| save(content)}
+      open(url, :allow_redirections => :safe).read.tap { |content| save(content) }
     end
   rescue Exception => error
     # Just try to load from file if something goes wrong.
@@ -102,17 +123,17 @@ class RubygemsProxy
 
   def save(contents)
     FileUtils.mkdir_p File.dirname(filepath)
-    File.open(filepath, "wb") {|handler| handler << contents}
+    File.open(filepath, "wb") { |handler| handler << contents }
   end
 
   def cached?
     case File.basename(filepath)
-    when /^specs\./
-      File.exist?(filepath) && (Time.now - File.mtime(filepath)).to_i < 84600
-    when /\.gz$/
-      false
-    else
-      File.file?(filepath)
+      when /^specs\./
+        File.exist?(filepath) && (Time.now - File.mtime(filepath)).to_i < 84600
+      when /\.gz$/
+        false
+      else
+        File.file?(filepath)
     end
   end
 
@@ -129,11 +150,11 @@ class RubygemsProxy
   end
 
   def url
-    File.join("http://rubygems.org", env["PATH_INFO"])
+    File.join(RUBY_GEMS_BASE_URI, env["PATH_INFO"])
   end
 
   def update_specs
-    Dir[File.dirname(__FILE__) + "/*.gz"].each {|file| File.unlink(file)}
+    Dir[File.dirname(__FILE__) + "/*.gz"].each { |file| File.unlink(file) }
     [200, {"Content-Type" => "text/plain"}, [""]]
   end
 end
