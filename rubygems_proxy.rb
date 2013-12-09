@@ -1,6 +1,7 @@
 require "open-uri"
 require "open_uri_redirections"
 require "net/http"
+require 'net/https'
 require "fileutils"
 require "logger"
 require "erb"
@@ -92,7 +93,9 @@ class RubygemsProxy
       [200, {'Content-Type' => '', 'Content-Length' => File.size(filepath).to_s}, []]
     else
       uri = URI(RUBY_GEMS_BASE_URI)
-      Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = uri.scheme == 'https'
+      http.start do
         request = Net::HTTP::Head.new path_with_query
         resp = http.request request
         headers = Hash[resp.to_hash.map { |k, v| [k, v.join('; ')] }]
@@ -100,7 +103,7 @@ class RubygemsProxy
       end
     end
   rescue Exception => ex
-    puts ex.backtrace.join("\n")
+    puts "#{ex.message}: #{ex.backtrace.join("\n")}"
   end
 
   def contents
